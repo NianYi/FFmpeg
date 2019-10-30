@@ -1015,7 +1015,7 @@ static int get_cluster_duration(MOVTrack *track, int cluster_idx)
         return 0;
 
     if (cluster_idx + 1 == track->entry)
-        next_dts = track->track_duration + track->start_dts;
+        next_dts = track->track_duration + track->start_pts;
     else
         next_dts = track->cluster[cluster_idx + 1].dts;
 
@@ -5546,7 +5546,11 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
                    "this case.\n",
                    pkt->stream_index, pkt->dts);
     }
-    trk->track_duration = pkt->dts - trk->start_dts + pkt->duration;
+    if (trk->start_pts == AV_NOPTS_VALUE) {
+        av_log(s, AV_LOG_WARNING, "pts has no value\n");
+        trk->start_pts = pkt->pts;
+    }
+    trk->track_duration = FFMAX(pkt->pts - trk->start_pts + pkt->duration, trk->track_duration);
     trk->last_sample_is_subtitle_end = 0;
 
     if (pkt->pts == AV_NOPTS_VALUE) {
@@ -6295,6 +6299,7 @@ static int mov_init(AVFormatContext *s)
          * this is updated. */
         track->hint_track = -1;
         track->start_dts  = AV_NOPTS_VALUE;
+        track->start_pts  = AV_NOPTS_VALUE;
         track->start_cts  = AV_NOPTS_VALUE;
         track->end_pts    = AV_NOPTS_VALUE;
         track->dts_shift  = AV_NOPTS_VALUE;

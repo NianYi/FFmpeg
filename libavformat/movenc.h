@@ -116,6 +116,7 @@ typedef struct MOVTrack {
     uint32_t    tref_tag;
     int         tref_id; ///< trackID of the referenced track
     int64_t     start_dts;
+    int64_t     start_pts;
     int64_t     start_cts;
     int64_t     end_pts;
     int         end_reliable;
