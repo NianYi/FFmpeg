@@ -1015,7 +1015,7 @@ static int get_cluster_duration(MOVTrack *track, int cluster_idx)
         return 0;
 
     if (cluster_idx + 1 == track->entry)
-        next_dts = track->track_duration + track->start_dts;
+        next_dts = track->end_dts;
     else
         next_dts = track->cluster[cluster_idx + 1].dts;
 
@@ -5149,8 +5149,7 @@ static int mov_flush_fragment(AVFormatContext *s, int force)
         mov->mdat_size = 0;
         for (i = 0; i < mov->nb_streams; i++) {
             if (mov->tracks[i].entry)
-                mov->tracks[i].frag_start += mov->tracks[i].start_dts +
-                                             mov->tracks[i].track_duration -
+                mov->tracks[i].frag_start += mov->tracks[i].end_dts -
                                              mov->tracks[i].cluster[0].dts;
             mov->tracks[i].entry = 0;
             mov->tracks[i].end_reliable = 0;
@@ -5208,7 +5207,7 @@ static int mov_flush_fragment(AVFormatContext *s, int force)
         int64_t duration = 0;
 
         if (track->entry)
-            duration = track->start_dts + track->track_duration -
+            duration = track->end_dts -
                        track->cluster[0].dts;
         if (mov->flags & FF_MOV_FLAG_SEPARATE_MOOF) {
             if (!track->mdat_buf)
@@ -5281,7 +5280,7 @@ static int check_pkt(AVFormatContext *s, AVPacket *pkt)
         ref = trk->cluster[trk->entry - 1].dts;
     } else if (   trk->start_dts != AV_NOPTS_VALUE
                && !trk->frag_discont) {
-        ref = trk->start_dts + trk->track_duration;
+        ref = trk->end_dts;
     } else
         ref = pkt->dts; // Skip tests for the first packet
 
@@ -5494,7 +5493,7 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
              * of the last packet of the previous fragment based on track_duration,
              * which might not exactly match our dts. Therefore adjust the dts
              * of this packet to be what the previous packets duration implies. */
-            trk->cluster[trk->entry].dts = trk->start_dts + trk->track_duration;
+            trk->cluster[trk->entry].dts = trk->end_dts;
             /* We also may have written the pts and the corresponding duration
              * in sidx/tfrf/tfxd tags; make sure the sidx pts and duration match up with
              * the next fragment. This means the cts of the first sample must
@@ -5546,13 +5545,17 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
                    "this case.\n",
                    pkt->stream_index, pkt->dts);
     }
-    trk->track_duration = pkt->dts - trk->start_dts + pkt->duration;
-    trk->last_sample_is_subtitle_end = 0;
-
     if (pkt->pts == AV_NOPTS_VALUE) {
         av_log(s, AV_LOG_WARNING, "pts has no value\n");
         pkt->pts = pkt->dts;
     }
+    if (trk->start_pts == AV_NOPTS_VALUE) {
+        trk->start_pts = pkt->pts;
+    }
+    trk->track_duration = FFMAX(pkt->pts - trk->start_pts + pkt->duration, trk->track_duration);
+    trk->end_dts = pkt->dts + pkt->duration;
+    trk->last_sample_is_subtitle_end = 0;
+
     if (pkt->dts != pkt->pts)
         trk->flags |= MOV_TRACK_CTTS;
     trk->cluster[trk->entry].cts   = pkt->pts - pkt->dts;
@@ -6295,7 +6298,9 @@ static int mov_init(AVFormatContext *s)
          * this is updated. */
         track->hint_track = -1;
         track->start_dts  = AV_NOPTS_VALUE;
+        track->start_pts  = AV_NOPTS_VALUE;
         track->start_cts  = AV_NOPTS_VALUE;
+        track->end_dts    = AV_NOPTS_VALUE;
         track->end_pts    = AV_NOPTS_VALUE;
         track->dts_shift  = AV_NOPTS_VALUE;
         if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
